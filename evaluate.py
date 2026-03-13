@@ -131,12 +131,15 @@ def compute_ece(df: pd.DataFrame, n_bins: int = 10) -> float | None:
     prob_cols = ["prob_negative", "prob_neutral", "prob_positive"]
     if not all(col in df.columns for col in prob_cols):
         return None
+    label_col = "label" if "label" in df.columns else "weak_label" if "weak_label" in df.columns else None
+    if label_col is None:
+        return None
 
     probs = df[prob_cols].copy()
     probs.columns = LABEL_ORDER
     confidences = probs.max(axis=1)
     predicted_labels = probs.idxmax(axis=1)
-    correctness = (predicted_labels == df["label"]).astype(float)
+    correctness = (predicted_labels == df[label_col]).astype(float)
 
     bins = pd.cut(confidences, bins=n_bins, labels=False, include_lowest=True)
     ece = 0.0
@@ -154,7 +157,11 @@ def compute_ece(df: pd.DataFrame, n_bins: int = 10) -> float | None:
 
 
 def compute_prediction_diagnostics(df: pd.DataFrame) -> dict:
-    y_true = df["label"]
+    label_col = "label" if "label" in df.columns else "weak_label" if "weak_label" in df.columns else None
+    if label_col is None:
+        raise ValueError("Prediction file must contain either 'label' or 'weak_label'.")
+
+    y_true = df[label_col]
     y_pred = df["pred_label"]
 
     overall_report = classification_report(
@@ -176,22 +183,22 @@ def compute_prediction_diagnostics(df: pd.DataFrame) -> dict:
     per_aspect = {}
     if "aspect" in df.columns:
         for aspect, aspect_df in df.groupby("aspect"):
-            aspect_true = aspect_df["label"]
+            aspect_true = aspect_df[label_col]
             aspect_pred = aspect_df["pred_label"]
             per_aspect[aspect] = {
                 "n_samples": int(len(aspect_df)),
                 "accuracy": round(float(accuracy_score(aspect_true, aspect_pred)), 4),
                 "f1_macro": round(float(f1_score(aspect_true, aspect_pred, average="macro", labels=LABEL_ORDER, zero_division=0)), 4),
                 "f1_weighted": round(float(f1_score(aspect_true, aspect_pred, average="weighted", labels=LABEL_ORDER, zero_division=0)), 4),
-                "label_distribution": {str(k): int(v) for k, v in aspect_df["label"].value_counts().to_dict().items()},
+                "label_distribution": {str(k): int(v) for k, v in aspect_df[label_col].value_counts().to_dict().items()},
                 "prediction_distribution": {str(k): int(v) for k, v in aspect_df["pred_label"].value_counts().to_dict().items()},
             }
 
-    error_df = df[df["label"] != df["pred_label"]].copy()
+    error_df = df[df[label_col] != df["pred_label"]].copy()
     error_transitions = []
     if not error_df.empty:
         trans = (
-            error_df.groupby(["label", "pred_label"]).size().reset_index(name="count")
+            error_df.groupby([label_col, "pred_label"]).size().reset_index(name="count")
             .sort_values("count", ascending=False)
         )
         error_transitions = trans.head(10).to_dict("records")
@@ -202,8 +209,9 @@ def compute_prediction_diagnostics(df: pd.DataFrame) -> dict:
 
     diagnostics = {
         "n_predictions": int(len(df)),
-        "n_errors": int((df["label"] != df["pred_label"]).sum()),
-        "error_rate": round(float((df["label"] != df["pred_label"]).mean()), 4),
+        "label_column": label_col,
+        "n_errors": int((df[label_col] != df["pred_label"]).sum()),
+        "error_rate": round(float((df[label_col] != df["pred_label"]).mean()), 4),
         "class_report": overall_report,
         "confusion_matrix": confusion,
         "per_aspect": per_aspect,
@@ -237,7 +245,7 @@ def collect_epoch_dirs(model_name: str) -> list[tuple[str, Path, int]]:
 def collect_epoch_results() -> pd.DataFrame:
     rows = []
 
-    for model_name in ["baseline", "lora"]:
+    for model_name in ["baseline", "lora", "retrained"]:
         for source, epoch_dir, epochs in collect_epoch_dirs(model_name):
             metrics = resolve_metrics(epoch_dir)
             if metrics is None:
@@ -302,7 +310,7 @@ def print_epoch_summary(df: pd.DataFrame) -> None:
         lambda x: f"{int(x):,}" if pd.notna(x) else "N/A"
     )
 
-    print("\n[EPOCH] Baseline vs LoRA per epoch:")
+    print("\n[EPOCH] Epoch sweep summary:")
     print(
         printable[[
             "model",

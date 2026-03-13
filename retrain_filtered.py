@@ -1,5 +1,6 @@
 import argparse
 import json
+import time
 from pathlib import Path
 
 import numpy as np
@@ -159,7 +160,9 @@ def main():
         compute_metrics=compute_metrics,
     )
 
+    start_time = time.time()
     trainer.train()
+    train_time = time.time() - start_time
 
     test_output = trainer.predict(test_dataset)
     test_logits = test_output.predictions
@@ -174,6 +177,7 @@ def main():
         "n_val": int(len(val_df)),
         "n_test": int(len(test_df)),
         "n_total_clean": int(len(data)),
+        "training_time_seconds": round(train_time, 2),
         "label_distribution": data["weak_label"].value_counts().to_dict(),
     }
 

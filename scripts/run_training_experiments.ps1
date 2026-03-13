@@ -18,6 +18,10 @@ $loraR = 16
 $loraAlpha = 32
 $loraDropout = 0.1
 
+$retrainCleanCsv = "data/processed/noise/clean_data.csv"
+$retrainBatchSize = 8
+$retrainLearningRate = 2e-5
+
 $results = @()
 
 function Invoke-TrainingRun {
@@ -99,8 +103,28 @@ foreach ($epochs in $epochsList) {
             "--lora_r", $loraR,
             "--lora_alpha", $loraAlpha,
             "--lora_dropout", $loraDropout
-        )
+    )
     $results += Read-Metrics -ModelType "lora" -Epochs $epochs -OutputDir $loraOutputDir
+
+    if (Test-Path $retrainCleanCsv) {
+        $retrainOutputDir = "models/retrained/epoch_$epochs"
+        Invoke-TrainingRun `
+            -Label "RETRAIN" `
+            -OutputDir $retrainOutputDir `
+            -Arguments @(
+                "retrain_filtered.py",
+                "--clean_csv", $retrainCleanCsv,
+                "--output_dir", $retrainOutputDir,
+                "--max_length", $maxLength,
+                "--test_size", $testSize,
+                "--val_size", $valSize,
+                "--epochs", $epochs,
+                "--batch_size", $retrainBatchSize,
+                "--lr", $retrainLearningRate,
+                "--seed", $seed
+            )
+        $results += Read-Metrics -ModelType "retrained" -Epochs $epochs -OutputDir $retrainOutputDir
+    }
 }
 
 Write-Host ""
@@ -119,4 +143,7 @@ $results |
     Format-Table -AutoSize
 
 Write-Host ""
-Write-Host "[RUNNER] All baseline and LoRA experiments for epochs 3, 5, and 8 completed successfully."
+if (-not (Test-Path $retrainCleanCsv)) {
+    Write-Host "[RUNNER] Retrain sweep skipped because clean data was not found at $retrainCleanCsv"
+}
+Write-Host "[RUNNER] All requested experiments for epochs 3, 5, and 8 completed successfully."
