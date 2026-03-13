@@ -1,68 +1,139 @@
-# ABSA Fintech Review Analysis
+# Fintech Review ABSA
 
-Aspect-Based Sentiment Analysis for Google Play Store reviews of Indonesian fintech lending apps, focused on three aspects: `risk`, `trust`, and `service`.
+![Status](https://img.shields.io/badge/status-on%20progress-ffb703)
+![Task](https://img.shields.io/badge/task-ABSA-219ebc)
+![Language](https://img.shields.io/badge/language-Indonesian-2a9d8f)
+![Model](https://img.shields.io/badge/model-IndoBERT%20base%20p1-264653)
+![Training](https://img.shields.io/badge/training-Baseline%20%2B%20LoRA-e76f51)
 
-This repository contains an end-to-end experimental pipeline covering review scraping, preprocessing, silver-label construction, IndoBERT baseline training, LoRA fine-tuning, evaluation, and a Streamlit demo app.
+An end-to-end Aspect-Based Sentiment Analysis pipeline for Google Play Store reviews of Indonesian fintech lending apps.
 
-## Highlights
+This project focuses on three business-relevant aspects:
 
-- Domain: Indonesian fintech app reviews (`Kredivo` and `Akulaku`)
-- Task: 3-aspect ABSA with 3 sentiment classes (`Negative`, `Neutral`, `Positive`)
-- Backbone: `indobenchmark/indobert-base-p1`
-- Training tracks: full fine-tuning baseline and LoRA
-- App demo: interactive Streamlit dashboard for live review analysis
-- Methodology note: active training data uses the v2-cleaned corpus reconciled with historical silver labels via `review_id` intersection
+- `risk`
+- `trust`
+- `service`
 
-## Repository Scope
+with three sentiment labels:
 
-The public repository is intended as a portfolio and reproducibility-oriented codebase.
+- `Negative`
+- `Neutral`
+- `Positive`
 
-Large artifacts such as trained models, raw scraped data, and full processed datasets are excluded from version control to keep the repository lightweight and clone-friendly.
+The repository is being developed as both:
 
-## Project Structure
+- an active thesis/research workspace
+- a public portfolio project for NLP, model experimentation, and applied ML engineering
+
+## Why This Project
+
+Most sentiment projects stop at generic positive-vs-negative classification. This one pushes further into aspect-level analysis on Indonesian fintech reviews, where user language is noisy, colloquial, and often mixes product trust, service quality, and perceived risk in the same review.
+
+That makes the project useful for demonstrating:
+
+- practical ABSA pipeline design
+- weak-label to cleaner-dataset reconciliation
+- IndoBERT fine-tuning and LoRA comparison
+- research-oriented experimentation with portfolio-grade packaging
+
+## Current Status
+
+This repository is still **on progress**.
+
+What is already in place:
+
+- v2 preprocessing pipeline
+- active v2 training dataset configuration
+- baseline and LoRA training scripts
+- evaluation pipeline
+- Streamlit dashboard
+- manual gold subset preparation
+
+What is still ongoing:
+
+- fresh training runs on the active v2 setup
+- final comparison on manually annotated gold data
+- stronger public demo assets such as screenshots and sample outputs
+
+## Pipeline Overview
+
+```mermaid
+flowchart LR
+	A[Google Play Reviews] --> B[Scraping]
+	B --> C[Preprocessing v2]
+	C --> D[Normalized Review Corpus]
+	D --> E[Historical Silver Labels from v1]
+	E --> F[review_id Intersection]
+	F --> G[Active Training Dataset v2]
+	G --> H1[Baseline Fine-Tuning]
+	G --> H2[LoRA Fine-Tuning]
+	H1 --> I[Evaluation on Silver Split]
+	H2 --> I
+	I --> J[Best Model Selection]
+	J --> K[Manual Gold Annotation]
+	K --> L[Final Validation Against Human Labels]
+```
+
+## Project Snapshot
+
+| Area | Current Choice |
+| --- | --- |
+| Domain | Indonesian fintech app reviews |
+| Apps | Kredivo, Akulaku |
+| Task | 3-aspect ABSA |
+| Labels | Negative, Neutral, Positive |
+| Backbone | `indobenchmark/indobert-base-p1` |
+| Training Tracks | Baseline full fine-tuning, LoRA |
+| Active Dataset | `data/processed/dataset_absa_50k_v2_intersection.csv` |
+| Final Validation Direction | Manual single-annotator gold subset |
+
+## Experiment Design
+
+```mermaid
+flowchart TD
+	A[reviews_clean_v2.csv] --> B[dataset_absa_v2.csv]
+	B --> C[dataset_absa_50k_v2_intersection.csv]
+	C --> D[train_baseline.py]
+	C --> E[train_lora.py]
+	D --> F[evaluate.py]
+	E --> F
+	F --> G[Compare metrics and errors]
+	G --> H[Select best checkpoint]
+	H --> I[Validate on gold subset]
+```
+
+## Repository Layout
 
 ```text
 .
-|- app.py
-|- config.py
-|- preprocess.py
-|- labeling.py
-|- train_baseline.py
-|- train_lora.py
-|- evaluate.py
-|- inference.py
-|- detect_label_noise.py
-|- predict_mc_dropout.py
-|- retrain_filtered.py
-|- scripts/
-|- docs/
-|- data/
+|- app.py                         # Streamlit dashboard
+|- config.py                      # central paths and configuration
+|- preprocess.py                  # review cleaning and normalization
+|- labeling.py                    # LLM-based silver labeling workflow
+|- train_baseline.py              # full fine-tuning pipeline
+|- train_lora.py                  # LoRA fine-tuning pipeline
+|- evaluate.py                    # experiment evaluation and comparison
+|- inference.py                   # inference helper for trained models
+|- detect_label_noise.py          # weak-label noise filtering utilities
+|- predict_mc_dropout.py          # uncertainty estimation utilities
+|- retrain_filtered.py            # retraining on filtered subsets
+|- scripts/                       # PowerShell and helper scripts
+|- docs/                          # project notes and execution docs
+|- data/                          # local datasets, manifests, annotation assets
 ```
 
-## Workflow
+## Key Methodology Notes
 
-1. Scrape and clean Google Play reviews.
-2. Build the active v2 normalized corpus.
-3. Reconcile historical silver labels into v2 via `review_id` intersection.
-4. Train IndoBERT baseline and LoRA models.
-5. Evaluate on the silver split.
-6. Validate final selected model on a manually annotated gold subset.
+This part matters if you are reading the repo as a research artifact.
 
-## Key Files
-
-- `train_baseline.py`: baseline full fine-tuning
-- `train_lora.py`: LoRA fine-tuning
-- `evaluate.py`: experiment comparison and evaluation summary
-- `app.py`: Streamlit dashboard
-- `scripts/run_baseline_epochs.ps1`: baseline epoch sweep
-- `scripts/run_lora_epochs.ps1`: LoRA epoch sweep
-- `scripts/run_training_experiments.ps1`: combined experiment runner
-- `docs/PROJECT_STATUS.md`: current project status
-- `doc.md`: concise active-context document
+- Historical silver labels were generated on v1 data.
+- The active v2 dataset was formed by intersecting v1 silver labels with the v2-cleaned corpus using `review_id`.
+- The current gold validation subset is a **single-annotator gold subset**, not a full diamond multi-annotator setup.
+- Public GitHub contents intentionally exclude large raw datasets, processed full datasets, and trained model artifacts.
 
 ## Quick Start
 
-### 1. Create environment
+### Environment Setup
 
 ```powershell
 python -m venv .venv
@@ -70,7 +141,7 @@ python -m venv .venv
 pip install -r requirements.txt
 ```
 
-### 2. Run training
+### Run Training
 
 Baseline sweep:
 
@@ -84,52 +155,72 @@ LoRA sweep:
 .\scripts\run_lora_epochs.ps1
 ```
 
-Run both:
+Run both tracks:
 
 ```powershell
 .\scripts\run_training_experiments.ps1
 ```
 
-### 3. Run evaluation
+### Run Evaluation
 
 ```powershell
 .\.venv\Scripts\python.exe evaluate.py
 ```
 
-### 4. Run dashboard
+### Run Dashboard
 
 ```powershell
 .\.venv\Scripts\python.exe -m streamlit run app.py
 ```
 
-## Data Note
+## Main Files to Explore
 
-The active experiment configuration in code points to the v2 training dataset:
+| File | Purpose |
+| --- | --- |
+| `train_baseline.py` | baseline full fine-tuning |
+| `train_lora.py` | parameter-efficient LoRA fine-tuning |
+| `evaluate.py` | experiment comparison and evaluation summary |
+| `app.py` | Streamlit interface for live review analysis |
+| `scripts/run_baseline_epochs.ps1` | baseline experiment runner |
+| `scripts/run_lora_epochs.ps1` | LoRA experiment runner |
+| `scripts/build_v2_intersection.py` | build active v2 intersection dataset |
+| `scripts/audit_normalization_v2.py` | audit normalization coverage and candidate slang mappings |
 
-- `data/processed/dataset_absa_50k_v2_intersection.csv`
+## Public Repo Scope
 
-That file is part of the local research workspace but should generally not be committed to the public repository if you want the repo to stay lightweight.
+This GitHub version is intentionally lightweight.
 
-## Methodology Note
+Excluded from version control:
 
-- Historical silver labels were generated on v1.
-- The active v2 experiment dataset is built by intersecting v1 silver labels with the v2-cleaned corpus.
-- Manual annotation files represent a single-annotator gold subset, not a full diamond annotation setup.
+- trained model directories
+- raw scraped datasets
+- full processed research datasets
+- local environment files and secrets
 
-## Portfolio Positioning
+Included because they are useful for understanding the work:
 
-This project is suitable to present as a portfolio item for:
+- code for the full pipeline
+- experiment runners
+- methodology notes
+- normalization resources
+- manifests and annotation support assets
 
-- NLP experimentation
-- Indonesian-language text classification
-- ABSA pipeline design
-- LLM-assisted data labeling workflow
-- Parameter-efficient fine-tuning with LoRA
-- Streamlit-based ML demo deployment
+## Portfolio Value
 
-## Next Improvements
+This project demonstrates practical experience in:
 
-- Add a small public sample dataset for reproducible demo runs
-- Add saved evaluation tables or figures to `docs/`
-- Add a license file before publishing publicly
-- Add GitHub Actions for basic linting and smoke tests
+- natural language processing
+- Indonesian text normalization
+- aspect-based sentiment analysis
+- weak supervision workflow design
+- experiment tracking mindset
+- LoRA fine-tuning for transformer models
+- Streamlit app prototyping for ML systems
+
+## Next Milestones
+
+- add screenshots and result tables to enrich the public presentation
+- add a tiny public sample dataset for demo reproducibility
+- complete fresh v2 training comparison
+- validate the best model against the manual gold subset
+- add a license and lightweight CI checks
