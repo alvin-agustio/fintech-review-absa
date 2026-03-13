@@ -9,6 +9,7 @@ Usage:
 """
 
 import json
+import re
 from pathlib import Path
 
 import pandas as pd
@@ -18,6 +19,7 @@ from config import MODELS_DIR, DATA_PROCESSED
 
 
 LABEL_ORDER = ["Negative", "Neutral", "Positive"]
+EPOCH_DIR_PATTERN = re.compile(r"^epoch_(\d+)$")
 
 
 def has_eval_artifacts(exp_dir: Path) -> bool:
@@ -36,10 +38,12 @@ def has_eval_artifacts(exp_dir: Path) -> bool:
     )
 
 
-def resolve_experiment_dir(name: str) -> Path:
-    active = MODELS_DIR / name
-    if has_eval_artifacts(active):
-        return active
+def find_candidate_roots(model_name: str) -> list[Path]:
+    roots: list[Path] = []
+
+    active = MODELS_DIR / model_name
+    if active.exists():
+        roots.append(active)
 
     archive_root = MODELS_DIR / "archive"
     if archive_root.exists():
@@ -48,11 +52,25 @@ def resolve_experiment_dir(name: str) -> Path:
             key=lambda p: p.stat().st_mtime,
             reverse=True,
         )
-        for snap in snapshots:
-            candidate = snap / name
-            if has_eval_artifacts(candidate):
-                print(f"  [INFO] Using archived artifacts for {name}: {candidate}")
-                return candidate
+        for snapshot in snapshots:
+            candidate = snapshot / model_name
+            if candidate.exists():
+                roots.append(candidate)
+
+    return roots
+
+
+def resolve_experiment_dir(name: str) -> Path:
+    active = MODELS_DIR / name
+    if has_eval_artifacts(active):
+        return active
+
+    for candidate_root in find_candidate_roots(name):
+        if candidate_root == active:
+            continue
+        if has_eval_artifacts(candidate_root):
+            print(f"  [INFO] Using archived artifacts for {name}: {candidate_root}")
+            return candidate_root
 
     return active
 
@@ -196,6 +214,118 @@ def compute_prediction_diagnostics(df: pd.DataFrame) -> dict:
     return diagnostics
 
 
+def collect_epoch_dirs(model_name: str) -> list[tuple[str, Path, int]]:
+    collected: list[tuple[str, Path, int]] = []
+    seen_paths: set[Path] = set()
+
+    for root in find_candidate_roots(model_name):
+        source = "active" if root.parent == MODELS_DIR else root.parent.name
+        for child in root.iterdir():
+            if not child.is_dir():
+                continue
+            match = EPOCH_DIR_PATTERN.match(child.name)
+            if not match:
+                continue
+            if child in seen_paths:
+                continue
+            seen_paths.add(child)
+            collected.append((source, child, int(match.group(1))))
+
+    return sorted(collected, key=lambda item: (item[2], item[0], str(item[1])))
+
+
+def collect_epoch_results() -> pd.DataFrame:
+    rows = []
+
+    for model_name in ["baseline", "lora"]:
+        for source, epoch_dir, epochs in collect_epoch_dirs(model_name):
+            metrics = resolve_metrics(epoch_dir)
+            if metrics is None:
+                continue
+            rows.append({
+                "model": model_name,
+                "epochs": epochs,
+                "source": source,
+                "output_dir": str(epoch_dir),
+                "accuracy": metrics.get("test_accuracy"),
+                "f1_macro": metrics.get("test_f1_macro"),
+                "f1_weighted": metrics.get("test_f1_weighted"),
+                "training_time_seconds": metrics.get("training_time_seconds"),
+                "trainable_params": metrics.get("trainable_params"),
+                "trainable_pct": metrics.get("trainable_pct"),
+                "n_train": metrics.get("n_train"),
+                "n_test": metrics.get("n_test"),
+            })
+
+    if not rows:
+        return pd.DataFrame()
+
+    df = pd.DataFrame(rows).sort_values(["epochs", "model", "source"]).reset_index(drop=True)
+    for col in ["accuracy", "f1_macro", "f1_weighted", "training_time_seconds", "trainable_pct"]:
+        if col in df.columns:
+            df[col] = pd.to_numeric(df[col], errors="coerce")
+    return df
+
+
+def build_epoch_wide_table(df: pd.DataFrame) -> pd.DataFrame:
+    if df.empty:
+        return df
+
+    subset = df[[
+        "model",
+        "epochs",
+        "accuracy",
+        "f1_macro",
+        "f1_weighted",
+        "training_time_seconds",
+        "trainable_params",
+    ]].copy()
+
+    wide = subset.pivot(index="epochs", columns="model")
+    wide.columns = [f"{metric}_{model}" for metric, model in wide.columns]
+    wide = wide.reset_index().sort_values("epochs")
+    return wide
+
+
+def print_epoch_summary(df: pd.DataFrame) -> None:
+    if df.empty:
+        print("\n[EPOCH] No epoch sweep artifacts found.")
+        return
+
+    printable = df.copy()
+    for col in ["accuracy", "f1_macro", "f1_weighted"]:
+        printable[col] = printable[col].map(lambda x: f"{x:.4f}" if pd.notna(x) else "N/A")
+    printable["training_time_seconds"] = printable["training_time_seconds"].map(
+        lambda x: f"{x:.2f}" if pd.notna(x) else "N/A"
+    )
+    printable["trainable_params"] = printable["trainable_params"].map(
+        lambda x: f"{int(x):,}" if pd.notna(x) else "N/A"
+    )
+
+    print("\n[EPOCH] Baseline vs LoRA per epoch:")
+    print(
+        printable[[
+            "model",
+            "epochs",
+            "accuracy",
+            "f1_macro",
+            "f1_weighted",
+            "training_time_seconds",
+            "trainable_params",
+            "source",
+        ]].to_string(index=False)
+    )
+
+    best_idx = df["f1_macro"].astype(float).idxmax()
+    best_row = df.loc[best_idx]
+    print(
+        "\n[EPOCH] Best F1-macro run: "
+        f"{best_row['model']} epoch={int(best_row['epochs'])} "
+        f"f1_macro={best_row['f1_macro']:.4f} "
+        f"accuracy={best_row['accuracy']:.4f}"
+    )
+
+
 def main():
     output_dir = DATA_PROCESSED / "evaluation"
     output_dir.mkdir(parents=True, exist_ok=True)
@@ -290,6 +420,18 @@ def main():
     with open(output_dir / "evaluation_detailed.json", "w", encoding="utf-8") as f:
         json.dump(detailed_results, f, indent=2, ensure_ascii=False)
 
+    epoch_df = collect_epoch_results()
+    epoch_wide_df = build_epoch_wide_table(epoch_df)
+    if not epoch_df.empty:
+        epoch_df.to_csv(output_dir / "epoch_comparison_summary.csv", index=False, encoding="utf-8")
+        epoch_df.to_json(
+            output_dir / "epoch_comparison_summary.json",
+            orient="records",
+            indent=2,
+            force_ascii=False,
+        )
+        epoch_wide_df.to_csv(output_dir / "epoch_comparison_wide.csv", index=False, encoding="utf-8")
+
     print("[EVAL] Evaluation Summary:")
     print(json.dumps(results, indent=2, ensure_ascii=False))
 
@@ -327,6 +469,8 @@ def main():
                     f"{params_display:>15}"
                 )
         print("=" * 70)
+
+    print_epoch_summary(epoch_df)
 
 
 if __name__ == "__main__":
