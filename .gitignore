@@ -21,6 +21,9 @@ data/processed/*.json
 !data/processed/diamond/
 !data/processed/diamond/*.md
 
+# Keep only the active training dataset public
+!data/processed/dataset_absa_50k_v2_intersection.csv
+
 # Logs and local outputs
 *.log
 
